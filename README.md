@@ -13,7 +13,7 @@ def make_it_emotional(message):
     """ A goofy function example """
     return f"{message}!!!"
 
-# Serve all functions decorated with @rpc17.expose remotely
+# Serve all functions decorated with @rpc17.expose
 rpc17.serve(host="localhost", port=8890)
 ```
 
@@ -29,13 +29,19 @@ result = remote.make_it_emotional("Hello")
 print(result)   # 'Hello!!!'
 ```
 
+# Installation
+
+```bash
+python3 -m pip install git+https://github.com/lnstadrum/rpc17.git
+```
+
 # Supported data types and function signatures
 
  - Python internals, mostly (scalars, strings, booleans, `bytes`, `None`)
  - Lists and dicts of Python internals (nesting is okay)
  - `numpy.ndarray`s
 
-Tuples and lists are not really supported: they get converted to lists (and this is really `msgspec`'s affair).
+Tuples and lists are not really supported: they get converted to lists (and this is `msgspec`'s affair).
 
 Functions accepting positional arguments and returning one or more of the above are okay. Keyword arguments are not supported.
 
