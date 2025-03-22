@@ -258,7 +258,7 @@ class Remote:
         check = self.client.recv(len(MAGIC), socket.MSG_WAITALL)
         if check != MAGIC:
             raise ConnectionError("Cannot connect to the server. "
-                                  "The remote server is not a gingeRPC server, "
+                                  "The remote server is not a rpc17 server, "
                                   "or serves an incompatible protocol version.")
 
         # read out the list of available functions
