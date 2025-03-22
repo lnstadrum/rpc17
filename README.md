@@ -41,7 +41,7 @@ python3 -m pip install git+https://github.com/lnstadrum/rpc17.git
  - Lists and dicts of Python internals (nesting is okay)
  - `numpy.ndarray`s
 
-Tuples and lists are not really supported: they get converted to lists (and this is `msgspec`'s affair).
+Tuples and sets are not really supported: they get converted to lists (and this is `msgspec`'s affair).
 
 Functions accepting positional arguments and returning one or more of the above are okay. Keyword arguments are not supported.
 
