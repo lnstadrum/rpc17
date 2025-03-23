@@ -1,6 +1,6 @@
 # Overview
 
-Yet another "simple" RPC library for Python. Because the others are not simple enough.
+Yet another "simple RPC library" for Python. Because the others are not simple enough.
 
 Expose functions for remote execution with a decorator, then call them remotely as if they were members of a local object.
 
@@ -37,19 +37,23 @@ python3 -m pip install git+https://github.com/lnstadrum/rpc17.git
 
 # Supported data types and function signatures
 
+Functions accepting positional arguments and returning one or more of the following are okay.
+
  - Python internals, mostly (scalars, strings, booleans, `bytes`, `None`)
  - Lists and dicts of Python internals (nesting is okay)
  - `numpy.ndarray`s
 
 Tuples and sets are not really supported: they get converted to lists (and this is `msgspec`'s affair).
 
-Functions accepting positional arguments and returning one or more of the above are okay. Keyword arguments are not supported.
+Keyword arguments are not supported.
 
 # Pros
 
  * Accepts functions taking and returning `numpy.ndarray`s (kinda designed for this particular purpose, actually).
  * Exceptions are rethrown remotely.
  * Efficient serialization with MessagePack
+ * The server can handle multiple clients at a time by threading or forking (check out `rpc17.Server`).
+ * TCP/IP is used by default. Unix domain sockets are supported too, e.g. for high speed communication between Docker containers.
 
 # Cons
 

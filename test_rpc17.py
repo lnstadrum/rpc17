@@ -1,6 +1,8 @@
 import numpy
 import rpc17
+import os
 import pytest
+import tempfile
 from threading import Thread
 
 
@@ -38,9 +40,18 @@ def raise_custom_error():
     raise CustomError()
 
 
-@pytest.fixture
-def server():
-    with rpc17.Server(server_class=rpc17.Server.ServerClass.SINGLE_THREADED) as server:
+@pytest.fixture(scope="module")
+def socket_filename():
+    with tempfile.TemporaryDirectory() as tempdir:
+        yield os.path.join(tempdir, "socket")
+
+@pytest.fixture(scope="module", params=[range(8890, 9100), None])
+def server(request, socket_filename):
+    # choose server address depending on the port number value
+    port = request.param
+    address = socket_filename if port is None else "localhost"
+
+    with rpc17.Server(address, port, threading=rpc17.Threading.SINGLE_THREADED) as server:
         thread = Thread(target=server.serve_forever)
         thread.start()
 
@@ -49,10 +60,9 @@ def server():
         server.server.shutdown()
         thread.join()
 
-
 @pytest.fixture(scope="function")
 def remote(server):
-    with rpc17.Remote(port=server.port) as remote:
+    with rpc17.Remote(address=server.address, port=server.port) as remote:
         yield remote
 
 

@@ -4,7 +4,8 @@ import msgspec
 import numpy
 import socket
 import socketserver
-from typing import Any, Iterable, Union
+import sys
+from typing import Any, Iterable, Optional, Union
 
 # Incremented every time a breaking change of the protocol happens.
 PROTOCOL_VERSION = 1
@@ -116,25 +117,26 @@ def expose(func):
     return func
 
 
+class Threading(enum.Enum):
+    """ Defines server behavior regarding multiple remote connections handling.
+    """
+    # Will handle a single remote at a time.
+    # Additional remote connections will block while the server is busy.
+    SINGLE_THREADED = "single_thread"
+
+    # Will handle multiple remote connections simultaneously using threading.
+    THREADING = "threading"
+
+    # Will handle multiple remote connections simultaneously using forking.
+    FORKING = "forking"
+
+
 class Server:
     """ Serves the functions to remote clients
     """
     class ClientDisconnected(Exception): pass
 
-    class ServerClass(enum.Enum):
-        """ Defines server behavior regarding multiple remote connections handling.
-        """
-        # Will handle a single remote at a time.
-        # Additional remote connections will block while the server is busy.
-        SINGLE_THREADED = "single_thread"
-
-        # Will handle multiple remote connections simultaneously using threading.
-        THREADING = "threading"
-
-        # Will handle multiple remote connections simultaneously using forking.
-        FORKING = "forking"
-
-    class TCPHandler(socketserver.BaseRequestHandler):
+    class RequestHandler(socketserver.BaseRequestHandler):
         def _get_int(self) -> int:
             reply = self.request.recv(4)
             if not reply:
@@ -191,38 +193,55 @@ class Server:
                 pass
 
     def __init__(self,
-                 host: str = "localhost",
-                 port: Union[Iterable[int], int] = range(8899, 9100),
-                 server_class: ServerClass = ServerClass.FORKING):
+                 address: str = "localhost",
+                 port: Optional[Union[Iterable[int], int]] = range(8899, 9100),
+                 threading: Threading = Threading.THREADING):
         """ Creates a new server to serve functions remotely.
 
         Args:
-            host (str, optional): Hostname or IP address to bind the server to. Defaults to "localhost".
+            address (str, optional): Hostname or socket filename to bind the server to. Defaults to "localhost".
             port (Union[Iterable[int], int], optional): Port number or range of port numbers to bind the server to. Defaults to range(8899, 9100).
-            server_class (ServerClass, optional): Defines server behavior regarding multiple remote connections handling. Defaults to ServerClass.FORKING.
+                                                        When set, TCP protocol is taken. Otherwise, when it is None, the Unix domain socket is used.
+            threading (Threading, optional): Defines server behavior regarding multiple remote connections handling. Defaults to Threading.THREADING.
         """
 
-        # Pick the selected server class
-        ServerClass = {
-            Server.ServerClass.SINGLE_THREADED: socketserver.TCPServer,
-            Server.ServerClass.THREADING: socketserver.ThreadingTCPServer,
-            Server.ServerClass.FORKING: socketserver.ForkingTCPServer
-        }[server_class]
+        # Pick the server class
+        server_class = ({
+            Threading.SINGLE_THREADED: socketserver.TCPServer,
+            Threading.THREADING: socketserver.ThreadingTCPServer,
+            Threading.FORKING: socketserver.ForkingTCPServer
+        }
+        if port is not None else
+        {
+            Threading.SINGLE_THREADED: socketserver.UnixStreamServer,
+            Threading.THREADING: socketserver.ThreadingUnixStreamServer,
+            Threading.FORKING: socketserver.ForkingUnixStreamServer if sys.version_info >= (3, 12) else None
+        }).get(threading)
+
+        if server_class is None:
+            raise ValueError(f"Unsupported threading mode {threading}")
 
         # Instantiate the server
-        if isinstance(port, int):
-            self.server = ServerClass((host, port), Server.TCPHandler)
-            self.port = port
+        self.address = address
+        if port is None:
+            # using Unix domain socket
+            self.server = server_class(address, Server.RequestHandler)
+            self.port = None
         else:
-            for port_candidate in port:
-                try:
-                    self.server = ServerClass((host, port_candidate), Server.TCPHandler)
-                    self.port = port_candidate
-                    break
-                except OSError:
-                    pass
+            # using TCP protocol
+            if isinstance(port, int):
+                self.server = server_class((address, port), Server.RequestHandler)
+                self.port = port
             else:
-                raise OSError(f"No available port in range {port}")
+                for port_candidate in port:
+                    try:
+                        self.server = server_class((address, port_candidate), Server.RequestHandler)
+                        self.port = port_candidate
+                        break
+                    except OSError:
+                        pass
+                else:
+                    raise OSError(f"No available port in range {port}")
 
     def __enter__(self):
         self.server.__enter__()
@@ -249,9 +268,20 @@ class Remote:
     def _get_value(self):
         return _decode_value(self.client.recv(self._get_int(), socket.MSG_WAITALL))
 
-    def __init__(self, host: str = "localhost", port: int = 8899):
-        self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client.connect((host, port))
+    def __init__(self, address: str = "localhost", port: Optional[int] = 8899):
+        """ Initiates connection to a remote server.
+
+        Args:
+            address (str, optional): Hostname or socket filename to connect to. Defaults to "localhost".
+            port (int, optional): Port number to connect to. Defaults to 8899.
+                                  When set, TCP protocol is taken. Otherwise, when it is None, the Unix domain socket is used.
+        """
+        if port is None:
+            self.client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.client.connect(address)
+        else:
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client.connect((address, port))
         
         # send a magic header first
         self.client.sendall(MAGIC)
@@ -300,7 +330,7 @@ class Remote:
         )
 
 
-def serve(host: str = "localhost", port: int = 8899):
+def serve(host: str = "localhost", port: Optional[int] = 8899):
     """ Serves the exposed functions to remote clients.
     """
     Server(host, port).serve_forever()
