@@ -334,3 +334,44 @@ def serve(host: str = "localhost", port: Optional[int] = 8899):
     """ Serves the exposed functions to remote clients.
     """
     Server(host, port).serve_forever()
+
+
+if __name__ == "__main__":
+    import argparse
+    import importlib
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="Serves functions from given Python scripts or modules.")
+    parser.add_argument("--threading", "-t",
+                        default=Threading.THREADING.value,
+                        choices=tuple(v.value for v in Threading),
+                        help=f"defines server behavior regarding multiple remote connections handling. Defaults to '{Threading.THREADING.value}.'")
+    parser.add_argument("file",
+                        type=Path,
+                        nargs="+",
+                        help="a Python script or module to serve functions from")
+    parser.add_argument("address",
+                        help="The address to serve at, e.g. tcp://localhost:8890 or unix://path/to/socket")
+    args = parser.parse_args()
+
+    # loop the provided list of Python files
+    for file_path in args.file:
+        # execute them and extend the function registry
+        spec = importlib.util.spec_from_file_location(file_path.stem, file_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        FUNCTIONS_REGISTRY += module.rpc17.FUNCTIONS_REGISTRY
+
+    # start the server
+    if args.address.startswith("tcp://"):
+        host, port = args.address[6:].split(":")
+        print(f"Serving at {host}:{port}...")
+        Server(host, int(port)).serve_forever()
+
+    elif args.address.startswith("unix://"):
+        path = args.address[7:]
+        print(f"Serving through Unix domain socket at {path}...")
+        Server(path, port=None).serve_forever()
+
+    else:
+        raise ValueError(f"Unable to infer protocol for address {args.address}. Valid addresses start with tcp:// and unix://")
