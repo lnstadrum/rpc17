@@ -270,16 +270,7 @@ class Remote:
     def _get_value(self):
         return _decode_value(self.client.recv(self._get_int(), socket.MSG_WAITALL))
 
-    def __init__(self, address: str = "tcp://localhost:8899"):
-        """ Initiates connection to a remote server.
-
-        Args:
-            address (str, optional): Hostname or socket filename to connect to. Defaults to "localhost".
-            port (int, optional): Port number to connect to. Defaults to 8899.
-                                  When set, TCP protocol is taken. Otherwise, when it is None, the Unix domain socket is used.
-        """
-        self.address, self.port = _parse_address(address)
-
+    def _connect(self):
         # establish a connection to the server
         if self.port is None:
             self.client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -287,7 +278,7 @@ class Remote:
         else:
             self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.client.connect((self.address, self.port))
-        
+
         # send a magic header first
         self.client.sendall(MAGIC)
         check = self.client.recv(len(MAGIC), socket.MSG_WAITALL)
@@ -301,6 +292,18 @@ class Remote:
         for i, func in enumerate(functions):
             setattr(self, func, functools.partial(self.__call__, i))
 
+    def __init__(self, address: str = "tcp://localhost:8899"):
+        """ Initiates connection to a remote server.
+
+        Args:
+            address (str, optional): Hostname or socket filename to connect to. Defaults to "localhost".
+            port (int, optional): Port number to connect to. Defaults to 8899.
+                                  When set, TCP protocol is taken. Otherwise, when it is None, the Unix domain socket is used.
+        """
+        self.address, self.port = _parse_address(address)
+        self._connect()
+        self._is_awaiting_response = False
+
     def __enter__(self):
         self.client.__enter__()
         return self
@@ -308,31 +311,63 @@ class Remote:
     def __exit__(self, exc_type, exc_value, traceback):
         return self.client.__exit__(exc_type, exc_value, traceback)
 
-    def __call__(self, func_number: int, *args):
+
+    def __call__(self, func_number: int, *args, sync=True):
         """ Calls a remote function by its number.
+
+        Args:
+            func_number (int): Number of the remote function to call.
+            *args: Arguments to pass to the remote function.
+            sync (bool, optional): If True, waits for the return value before returning.
+                                   Otherwise, returns immediately after the call.
+                                   await_return() needs to called after that to get the result.
         """
+        if self._is_awaiting_response:
+            raise RuntimeError("Another call is in progress. Await for its return first.")
+
         # prepare message header: number of the function to call and number of arguments
         header = ((func_number << 8) + len(args)).to_bytes(4, "big")
-        self.client.sendall(header)
+        try:
+            self.client.sendall(header)
+        except BrokenPipeError:
+            # try to reconnect once if the connection is broken
+            self._connect()
+            self.client.sendall(header)
 
         # send arguments
         for arg in args:
             content = _encode_value(arg)
             self.client.sendall(len(content).to_bytes(4, "big") + content)
 
-        # receive response
-        return_code = self._get_int(signed=True)
-        if return_code < 0:
-            cls = next(cls for (cls, code) in COMMON_EXCEPTIONS.items() if return_code == code)
-            raise cls(self._get_value())
+        self._is_awaiting_response = True
+        if sync:
+            # wait for response
+            return self.await_return()
 
-        if return_code == 0:
-            return self._get_value()
 
-        return tuple(
-            self._get_value()
-            for _ in range(return_code)
-        )
+    def await_return(self):
+        """ Waits for a return value after a function call.
+        """
+        if not self._is_awaiting_response:
+            raise RuntimeError("No function call in progress.")
+
+        try:
+            return_code = self._get_int(signed=True)
+
+            if return_code < 0:
+                cls = next(cls for (cls, code) in COMMON_EXCEPTIONS.items() if return_code == code)
+                raise cls(self._get_value())
+
+            if return_code == 0:
+                return self._get_value()
+
+            return tuple(
+                self._get_value()
+                for _ in range(return_code)
+            )
+
+        finally:
+            self._is_awaiting_response = False
 
 
 def serve(address):
