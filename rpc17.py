@@ -5,7 +5,7 @@ import numpy
 import socket
 import socketserver
 import sys
-from typing import Any, Iterable, Optional, Union
+from typing import Any, Iterable, Optional, Tuple, Union
 
 # Incremented every time a breaking change of the protocol happens.
 PROTOCOL_VERSION = 1
@@ -80,6 +80,22 @@ FUNCTIONS_REGISTRY = []
 
 _encoder = msgspec.msgpack.Encoder()
 _decoder = msgspec.msgpack.Decoder(tuple)
+
+
+def _parse_address(address: str) -> Tuple[str, int]:
+    # start the server
+    if address.startswith("tcp://"):
+        host, port = address[6:].split(":")
+        try:
+            return host, int(port)
+        except ValueError:
+            raise ValueError(f"Invalid port number in address {address}")
+
+    if address.startswith("unix://"):
+        path = address[7:]
+        return path, None
+
+    raise ValueError(f"Unable to infer protocol for address {address}. Valid addresses start with tcp:// and unix://")
 
 
 def _encode_value(value: Any) -> bytes:
@@ -193,17 +209,17 @@ class Server:
                 pass
 
     def __init__(self,
-                 address: str = "localhost",
-                 port: Optional[Union[Iterable[int], int]] = range(8899, 9100),
+                 address: str = "tcp://localhost:8899",
                  threading: Threading = Threading.THREADING):
         """ Creates a new server to serve functions remotely.
 
         Args:
-            address (str, optional): Hostname or socket filename to bind the server to. Defaults to "localhost".
-            port (Union[Iterable[int], int], optional): Port number or range of port numbers to bind the server to. Defaults to range(8899, 9100).
-                                                        When set, TCP protocol is taken. Otherwise, when it is None, the Unix domain socket is used.
+            address (str, optional): The address to serve at including protocol and port number if needed, e.g. tcp://localhost:8899 or unix://path/to/socket
             threading (Threading, optional): Defines server behavior regarding multiple remote connections handling. Defaults to Threading.THREADING.
         """
+
+        self.address = address
+        address, port = _parse_address(address)
 
         # Pick the server class
         server_class = ({
@@ -222,26 +238,12 @@ class Server:
             raise ValueError(f"Unsupported threading mode {threading}")
 
         # Instantiate the server
-        self.address = address
         if port is None:
             # using Unix domain socket
             self.server = server_class(address, Server.RequestHandler)
-            self.port = None
         else:
             # using TCP protocol
-            if isinstance(port, int):
-                self.server = server_class((address, port), Server.RequestHandler)
-                self.port = port
-            else:
-                for port_candidate in port:
-                    try:
-                        self.server = server_class((address, port_candidate), Server.RequestHandler)
-                        self.port = port_candidate
-                        break
-                    except OSError:
-                        pass
-                else:
-                    raise OSError(f"No available port in range {port}")
+            self.server = server_class((address, port), Server.RequestHandler)
 
     def __enter__(self):
         self.server.__enter__()
@@ -268,7 +270,7 @@ class Remote:
     def _get_value(self):
         return _decode_value(self.client.recv(self._get_int(), socket.MSG_WAITALL))
 
-    def __init__(self, address: str = "localhost", port: Optional[int] = 8899):
+    def __init__(self, address: str = "tcp://localhost:8899"):
         """ Initiates connection to a remote server.
 
         Args:
@@ -276,12 +278,15 @@ class Remote:
             port (int, optional): Port number to connect to. Defaults to 8899.
                                   When set, TCP protocol is taken. Otherwise, when it is None, the Unix domain socket is used.
         """
-        if port is None:
+        self.address, self.port = _parse_address(address)
+
+        # establish a connection to the server
+        if self.port is None:
             self.client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self.client.connect(address)
+            self.client.connect(self.address)
         else:
             self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.client.connect((address, port))
+            self.client.connect((self.address, self.port))
         
         # send a magic header first
         self.client.sendall(MAGIC)
@@ -330,10 +335,10 @@ class Remote:
         )
 
 
-def serve(host: str = "localhost", port: Optional[int] = 8899):
+def serve(address):
     """ Serves the exposed functions to remote clients.
     """
-    Server(host, port).serve_forever()
+    Server(address).serve_forever()
 
 
 if __name__ == "__main__":
@@ -351,7 +356,7 @@ if __name__ == "__main__":
                         nargs="+",
                         help="a Python script or module to serve functions from")
     parser.add_argument("address",
-                        help="The address to serve at, e.g. tcp://localhost:8890 or unix://path/to/socket")
+                        help="The address to serve at including protocol and port number if needed, e.g. tcp://localhost:8899 or unix://path/to/socket")
     args = parser.parse_args()
 
     # loop the provided list of Python files
@@ -363,15 +368,5 @@ if __name__ == "__main__":
         FUNCTIONS_REGISTRY += module.rpc17.FUNCTIONS_REGISTRY
 
     # start the server
-    if args.address.startswith("tcp://"):
-        host, port = args.address[6:].split(":")
-        print(f"Serving at {host}:{port}...")
-        Server(host, int(port)).serve_forever()
-
-    elif args.address.startswith("unix://"):
-        path = args.address[7:]
-        print(f"Serving through Unix domain socket at {path}...")
-        Server(path, port=None).serve_forever()
-
-    else:
-        raise ValueError(f"Unable to infer protocol for address {args.address}. Valid addresses start with tcp:// and unix://")
+    print(f"Serving at {args.address}...")
+    Server(args.address, threading=args.threading).serve_forever()

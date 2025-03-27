@@ -45,24 +45,34 @@ def socket_filename():
     with tempfile.TemporaryDirectory() as tempdir:
         yield os.path.join(tempdir, "socket")
 
-@pytest.fixture(scope="module", params=[range(8890, 9100), None])
+
+@pytest.fixture(scope="module", params=[range(8890, 9100), (None,)])
 def server(request, socket_filename):
-    # choose server address depending on the port number value
-    port = request.param
-    address = socket_filename if port is None else "localhost"
+    for port in request.param:
+        # choose server address depending on the port number value
+        address = f"unix://{socket_filename}" if port is None else f"tcp://localhost:{port}"
 
-    with rpc17.Server(address, port, threading=rpc17.Threading.SINGLE_THREADED) as server:
-        thread = Thread(target=server.serve_forever)
-        thread.start()
+        # attempt to start the server
+        # if it fails, try the next port number in the range
+        # if all ports are tried and none of them work, raise an error
+        try:
+            with rpc17.Server(address, threading=rpc17.Threading.SINGLE_THREADED) as server:
+                thread = Thread(target=server.serve_forever)
+                thread.start()
 
-        yield server
+                yield server
 
-        server.server.shutdown()
-        thread.join()
+                server.server.shutdown()
+                thread.join()
+                return
+        except OSError:
+            continue
+    raise OSError("No available port in the range")
+
 
 @pytest.fixture(scope="function")
 def remote(server):
-    with rpc17.Remote(address=server.address, port=server.port) as remote:
+    with rpc17.Remote(server.address) as remote:
         yield remote
 
 

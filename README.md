@@ -14,7 +14,7 @@ def make_it_emotional(message):
     return f"{message}!!!"
 
 # Serve all functions decorated with @rpc17.expose
-rpc17.serve(host="localhost", port=8890)
+rpc17.serve("tcp://localhost:8899")
 ```
 
 Call your functions like that:
@@ -22,7 +22,7 @@ Call your functions like that:
 from rpc17 import Remote
 
 # Connect to the remote server
-remote = Remote("localhost", port=8890)
+remote = Remote("tcp://localhost:8899")
 
 # All the exposed functions are now accessible as members of `remote`:
 result = remote.make_it_emotional("Hello")
