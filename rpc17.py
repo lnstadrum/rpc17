@@ -5,6 +5,7 @@ import numpy
 import socket
 import socketserver
 import sys
+import traceback
 from typing import Any, Iterable, Optional, Tuple, Union
 
 # Incremented every time a breaking change of the protocol happens.
@@ -194,7 +195,7 @@ class Server:
                     except Exception as ex:
                         # Process the exception, if any
                         self._send_signed_int(COMMON_EXCEPTIONS.get(ex.__class__, -1))
-                        self._send_bytes(_encode_value(str(ex)))
+                        self._send_bytes(_encode_value(traceback.format_exc()))
                         continue
 
                     # Send back the returned value
