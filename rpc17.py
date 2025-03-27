@@ -285,7 +285,7 @@ class Remote:
         if check != MAGIC:
             raise ConnectionError("Cannot connect to the server. "
                                   "The remote server is not a rpc17 server, "
-                                  "or serves an incompatible protocol version.")
+                                  "or uses an incompatible protocol version.")
 
         # read out the list of available functions
         functions = _decoder.decode(self.client.recv(self._get_int()))

@@ -53,7 +53,7 @@ Keyword arguments are not supported.
  * Exceptions are rethrown remotely.
  * Efficient serialization with MessagePack
  * The server can handle multiple clients at a time by threading or forking (check out `rpc17.Server`).
- * TCP/IP is used by default. Unix domain sockets are supported too, e.g. for high speed communication between Docker containers.
+ * TCP/IP and Unix domain sockets are supported.
 
 # Cons
 
