@@ -404,4 +404,4 @@ if __name__ == "__main__":
 
     # start the server
     print(f"Serving at {args.address}...")
-    Server(args.address, threading=args.threading).serve_forever()
+    Server(args.address, threading=Threading(args.threading)).serve_forever()
