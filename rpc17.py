@@ -1,3 +1,4 @@
+import builtins
 import enum
 import functools
 import msgspec
@@ -9,7 +10,7 @@ import traceback
 from typing import Any, Iterable, Optional, Tuple, Union
 
 # Incremented every time a breaking change of the protocol happens.
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 # Initial message when establishing connection.
 # Loosely ensures that the client and the server are speaking the same language.
@@ -62,17 +63,6 @@ TYPE_MAP = {
 
 INV_TYPE_MAP = { val.value: dtype
                  for dtype, val in TYPE_MAP.items() }
-
-
-# List of common exception types that can be raised on the client side
-COMMON_EXCEPTIONS = {
-    Exception: -1,
-    NameError: -2,
-    KeyError: -3,
-    IndexError: -4,
-    TypeError: -5,
-    ValueError: -6
-}
 
 
 # List of functions that can be called remotely
@@ -193,9 +183,16 @@ class Server:
                             raise NameError(f"<function #{fun_num}>")
                         results = FUNCTIONS_REGISTRY[fun_num](*args)
                     except Exception as ex:
-                        # Process the exception, if any
-                        self._send_signed_int(COMMON_EXCEPTIONS.get(ex.__class__, -1))
-                        self._send_bytes(_encode_value(traceback.format_exc()))
+                        # Send the exception class and message
+                        class_name, message = ex.__class__.__name__.encode(), str(ex).encode()
+                        self._send_signed_int(-1)
+                        self._send_bytes(class_name)
+                        self._send_bytes(message)
+
+                        # Send back the traceback without the topmost frame
+                        tb = traceback.format_tb(ex.__traceback__)
+                        tb = tb.pop(0)
+                        self._send_bytes("".join(tb).encode())
                         continue
 
                     # Send back the returned value
@@ -260,6 +257,10 @@ class Server:
         self.server.shutdown()
 
 
+class RemoteException(Exception):
+    pass
+
+
 class Remote:
     """ Connects to a server and allows to call functions remotely.
         Once connected, exposes the remote functions registry as its own member functions.
@@ -268,8 +269,11 @@ class Remote:
     def _get_int(self, signed=False) -> int:
         return int.from_bytes(self.client.recv(4), "big", signed=signed)
 
-    def _get_value(self):
+    def _get_value(self) -> Any:
         return _decode_value(self.client.recv(self._get_int(), socket.MSG_WAITALL))
+
+    def _get_string(self) -> str:
+        return self.client.recv(self._get_int(), socket.MSG_WAITALL).decode()
 
     def _connect(self):
         # establish a connection to the server
@@ -355,9 +359,13 @@ class Remote:
         try:
             return_code = self._get_int(signed=True)
 
+            # raise an exception
             if return_code < 0:
-                cls = next(cls for (cls, code) in COMMON_EXCEPTIONS.items() if return_code == code)
-                raise cls(self._get_value())
+                class_name = self._get_string()
+                message = self._get_string()
+                traceback = self._get_string()
+                exception_class = getattr(builtins, class_name, RemoteException)
+                raise exception_class(traceback + message)
 
             if return_code == 0:
                 return self._get_value()

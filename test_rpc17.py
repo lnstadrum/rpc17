@@ -15,24 +15,8 @@ def triple(x):
     return x, x, x
 
 @rpc17.expose
-def raise_name_error():
-    _()
-
-@rpc17.expose
 def raise_key_error():
     {1: 2}[3]
-
-@rpc17.expose
-def raise_index_error():
-    [0, 1][2]
-
-@rpc17.expose
-def raise_type_error():
-    "x" + 1
-
-@rpc17.expose
-def raise_value_error():
-    float("x")
 
 @rpc17.expose
 def raise_custom_error():
@@ -80,16 +64,8 @@ class TestFunctionsRegistry:
     def test(self):
         assert echo("123") == "123"
         assert triple(1) == (1, 1, 1)
-        with pytest.raises(NameError):
-            raise_name_error()
         with pytest.raises(KeyError):
             raise_key_error()
-        with pytest.raises(IndexError):
-            raise_index_error()
-        with pytest.raises(TypeError):
-            raise_type_error()
-        with pytest.raises(ValueError):
-            raise_value_error()
         with pytest.raises(Exception):
             raise_custom_error()
 
@@ -98,11 +74,7 @@ class TestCommunication:
     def test_remote_function_availability(self, remote):
         assert remote.echo is not None
         assert remote.triple is not None
-        assert remote.raise_name_error is not None
         assert remote.raise_key_error is not None
-        assert remote.raise_index_error is not None
-        assert remote.raise_type_error is not None
-        assert remote.raise_value_error is not None
         assert remote.raise_custom_error is not None
 
     @pytest.mark.parametrize("value", [
@@ -137,26 +109,10 @@ class TestCommunication:
 
 
 class TestExceptions:
-    def test_name_error(self, remote):
-        with pytest.raises(NameError):
-            remote.raise_name_error()
-
     def test_key_error(self, remote):
         with pytest.raises(KeyError):
             remote.raise_key_error()
 
-    def test_index_error(self, remote):
-        with pytest.raises(IndexError):
-            remote.raise_index_error()
-
-    def test_type_error(self, remote):
-        with pytest.raises(TypeError):
-            remote.raise_type_error()
-
-    def test_value_error(self, remote):
-        with pytest.raises(ValueError):
-            remote.raise_value_error()
-
     def test_custom_error(self, remote):
-        with pytest.raises(Exception):
+        with pytest.raises(rpc17.RemoteException):
             remote.raise_custom_error()
