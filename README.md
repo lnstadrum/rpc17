@@ -47,6 +47,10 @@ Tuples and sets are not really supported: they get converted to lists (and this 
 
 Keyword arguments are not supported.
 
+A limited support of generators is provided, with two caveats:
+ - An instantiated generator needs to be fully consumed or closed before calling any other function of the same `Remote` instance (mind `strict=True` when using `zip(...)`).
+ - The generation is asynchronous, i.e., the server starts yielding values before the client starts consuming them. The buffering happens at the socket level. This could actually be beneficial for speed.
+
 # Pros
 
  * Accepts functions taking and returning `numpy.ndarray`s (kinda designed for this particular purpose, actually).

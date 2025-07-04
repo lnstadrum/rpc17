@@ -7,7 +7,8 @@ import socket
 import socketserver
 import sys
 import traceback
-from typing import Any, Iterable, Optional, Tuple, Union
+import types
+from typing import Any, Tuple
 
 # Incremented every time a breaking change of the protocol happens.
 PROTOCOL_VERSION = 2
@@ -63,6 +64,13 @@ TYPE_MAP = {
 
 INV_TYPE_MAP = { val.value: dtype
                  for dtype, val in TYPE_MAP.items() }
+
+
+class ReturnCode:
+    OK = 0
+    EXCEPTION = -1
+    GENERATOR_START = -2
+    GENERATOR_STOP = -3
 
 
 # List of functions that can be called remotely
@@ -156,6 +164,41 @@ class Server:
         def _send_bytes(self, bytes: bytes):
             self.request.sendall(len(bytes).to_bytes(4, "big") + bytes)
 
+        def _send_exception(self, ex: Exception):
+            """ Sends the exception class, message and traceback.
+            """
+            class_name, message = ex.__class__.__name__.encode(), str(ex).encode()
+            self._send_signed_int(ReturnCode.EXCEPTION)
+            self._send_bytes(class_name)
+            self._send_bytes(message)
+
+            # Send back the traceback without the topmost frame
+            tb = traceback.format_tb(ex.__traceback__)
+            tb = tb.pop(0)
+            self._send_bytes("".join(tb).encode())
+
+        def _send_returned_value(self, values: Any):
+            """ Sends back the returned value from a function call.
+            """
+            if isinstance(values, tuple):
+                self._send_signed_int(len(values))
+                for value in values:
+                    self._send_bytes(_encode_value(value))
+
+            elif isinstance(values, types.GeneratorType):
+                # Send the generated values one by one
+                try:
+                    self._send_signed_int(ReturnCode.GENERATOR_START)
+                    for val in values:
+                        self._send_returned_value(val)
+                    self._send_signed_int(ReturnCode.GENERATOR_STOP)
+                except Exception as ex:
+                    self._send_exception(ex)
+
+            else:
+                self._send_signed_int(ReturnCode.OK)
+                self._send_bytes(_encode_value(values))
+
         def handle(self):
             # Start with the magic header
             check = self.request.recv(len(MAGIC), socket.MSG_WAITALL)
@@ -181,28 +224,12 @@ class Server:
                     try:
                         if fun_num < 0 or fun_num >= len(FUNCTIONS_REGISTRY):
                             raise NameError(f"<function #{fun_num}>")
-                        results = FUNCTIONS_REGISTRY[fun_num](*args)
+                        returned_value = FUNCTIONS_REGISTRY[fun_num](*args)
+
+                        # Send back the returned value
+                        self._send_returned_value(returned_value)
                     except Exception as ex:
-                        # Send the exception class and message
-                        class_name, message = ex.__class__.__name__.encode(), str(ex).encode()
-                        self._send_signed_int(-1)
-                        self._send_bytes(class_name)
-                        self._send_bytes(message)
-
-                        # Send back the traceback without the topmost frame
-                        tb = traceback.format_tb(ex.__traceback__)
-                        tb = tb.pop(0)
-                        self._send_bytes("".join(tb).encode())
-                        continue
-
-                    # Send back the returned value
-                    if isinstance(results, tuple):
-                        self._send_signed_int(len(results))
-                        for result in results:
-                            self._send_bytes(_encode_value(result))
-                    else:
-                        self._send_signed_int(0)
-                        self._send_bytes(_encode_value(results))
+                        self._send_exception(ex)
             except Server.ClientDisconnected:
                 pass
 
@@ -274,6 +301,42 @@ class Remote:
 
     def _get_string(self) -> str:
         return self.client.recv(self._get_int(), socket.MSG_WAITALL).decode()
+
+    def _return_generator(self):
+        try:
+            while True:
+                rc = self._get_int(signed=True)
+                if rc == ReturnCode.GENERATOR_STOP:
+                    return
+                yield self._process_return_code(rc)
+        except GeneratorExit:
+            while rc != ReturnCode.GENERATOR_STOP:
+                rc = self._get_int(signed=True)
+                self._process_return_code(rc)
+
+    def _process_return_code(self, rc):
+        if rc == ReturnCode.OK:
+            v = self._get_value()
+            return v
+
+        if rc > 0:
+            return tuple(self._get_value()
+                         for _ in range(rc))
+
+        if rc == ReturnCode.EXCEPTION:
+            class_name = self._get_string()
+            message = self._get_string()
+            traceback = self._get_string()
+            exception_class = getattr(builtins, class_name, RemoteException)
+            raise exception_class(traceback + message)
+
+        if rc == ReturnCode.GENERATOR_START:
+            return self._return_generator()
+
+        if rc == ReturnCode.GENERATOR_STOP:
+            return
+
+        raise NotImplementedError(f"Return code not implemented: {rc}.")
 
     def _connect(self):
         # establish a connection to the server
@@ -359,21 +422,12 @@ class Remote:
         try:
             return_code = self._get_int(signed=True)
 
-            # raise an exception
-            if return_code < 0:
-                class_name = self._get_string()
-                message = self._get_string()
-                traceback = self._get_string()
-                exception_class = getattr(builtins, class_name, RemoteException)
-                raise exception_class(traceback + message)
+            # There might be pending exhausted generators:
+            # ignore stop iteration return codes.
+            while return_code == ReturnCode.GENERATOR_STOP:
+                return_code = self._get_int(signed=True)
 
-            if return_code == 0:
-                return self._get_value()
-
-            return tuple(
-                self._get_value()
-                for _ in range(return_code)
-            )
+            return self._process_return_code(return_code)
 
         finally:
             self._is_awaiting_response = False

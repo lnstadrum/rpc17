@@ -3,6 +3,7 @@ import rpc17
 import os
 import pytest
 import tempfile
+import types
 from threading import Thread
 
 
@@ -22,6 +23,16 @@ def raise_key_error():
 def raise_custom_error():
     class CustomError(Exception): pass
     raise CustomError()
+
+@rpc17.expose
+def generate_integers(limit: int):
+    for i in range(limit):
+        yield i
+
+@rpc17.expose
+def generate_integers_nested(limit):
+    for i in limit:
+        yield generate_integers(i)
 
 
 @pytest.fixture(scope="module")
@@ -116,3 +127,37 @@ class TestExceptions:
     def test_custom_error(self, remote):
         with pytest.raises(rpc17.RemoteException):
             remote.raise_custom_error()
+
+
+class TestGenerator:
+    def test_generator(self, remote):
+        gen = remote.generate_integers(10)
+        assert isinstance(gen, types.GeneratorType)
+        for x, y in enumerate(gen):
+            assert x == y
+
+        # ensure that the generator can be iterated multiple times
+        gen = remote.generate_integers(20)
+        values = list(gen)
+        assert values == list(range(20))
+
+    def test_nested_generators(self, remote):
+        limits = [2, 5, 3]
+        gen = remote.generate_integers_nested(limits)
+        assert isinstance(gen, types.GeneratorType)
+        for lim, g in zip(limits, gen, strict=True):
+            for x, y in zip(range(lim), g, strict=True):
+                assert x == y
+
+    def test_early_close(self, remote):
+        # begin consuming a generator
+        gen = remote.generate_integers(100)
+        for _ in range(10):
+            next(gen)
+
+        # close it before fully consumed
+        gen.close()
+
+        # ensure a new generator instance can be created
+        for x, y in zip(range(5), remote.generate_integers(5)):
+            assert x == y
