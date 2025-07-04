@@ -145,9 +145,10 @@ class TestGenerator:
         limits = [2, 5, 3]
         gen = remote.generate_integers_nested(limits)
         assert isinstance(gen, types.GeneratorType)
-        for lim, g in zip(limits, gen, strict=True):
-            for x, y in zip(range(lim), g, strict=True):
+        for lim, g in zip(limits, gen):
+            for x, y in zip(range(lim), g):
                 assert x == y
+            g.close()
 
     def test_early_close(self, remote):
         # begin consuming a generator
