@@ -303,6 +303,8 @@ class Remote:
         return self.client.recv(self._get_int(), socket.MSG_WAITALL).decode()
 
     def _return_generator(self):
+        """ Returns a generator that yields values from the remote generator function.
+        """
         try:
             while True:
                 rc = self._get_int(signed=True)
@@ -314,16 +316,22 @@ class Remote:
                 rc = self._get_int(signed=True)
                 self._process_return_code(rc)
 
-    def _process_return_code(self, rc):
+    def _process_return_code(self, rc: int):
+        """ Processes the return code from the server.
+            Reads the corresponding value from the socket and returns it.
+        """
         if rc == ReturnCode.OK:
+            # return a single value
             v = self._get_value()
             return v
 
         if rc > 0:
+            # return a tuple of values
             return tuple(self._get_value()
                          for _ in range(rc))
 
         if rc == ReturnCode.EXCEPTION:
+            # raise an exception
             class_name = self._get_string()
             message = self._get_string()
             traceback = self._get_string()
@@ -331,6 +339,7 @@ class Remote:
             raise exception_class(traceback + message)
 
         if rc == ReturnCode.GENERATOR_START:
+            # return a generator
             return self._return_generator()
 
         if rc == ReturnCode.GENERATOR_STOP:
@@ -365,8 +374,6 @@ class Remote:
 
         Args:
             address (str, optional): Hostname or socket filename to connect to. Defaults to "localhost".
-            port (int, optional): Port number to connect to. Defaults to 8899.
-                                  When set, TCP protocol is taken. Otherwise, when it is None, the Unix domain socket is used.
         """
         self.address, self.port = _parse_address(address)
         self._connect()

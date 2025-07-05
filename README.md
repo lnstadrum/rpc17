@@ -2,7 +2,7 @@
 
 Yet another "simple RPC library" for Python. Because the others are not simple enough.
 
-Expose functions for remote execution with a decorator, then call them remotely as if they were members of a local object.
+Expose functions for remote execution using a decorator, then call them remotely as if they were members of a local object.
 
 Serve your functions like this:
 ```python
@@ -37,28 +37,28 @@ python3 -m pip install git+https://github.com/lnstadrum/rpc17.git
 
 # Supported data types and function signatures
 
-Functions accepting positional arguments and returning one or more of the following are okay.
+Functions accepting positional arguments and returning one or more of the following types are supported:
 
- - Python internals, mostly (scalars, strings, booleans, `bytes`, `None`)
- - Lists and dicts of Python internals (nesting is okay)
+ - Core Python types (scalars, strings, booleans, `bytes`, `None`)
+ - Lists and dictionaries containing core Python types (nesting is fine)
  - `numpy.ndarray`s
 
-Tuples and sets are not really supported: they get converted to lists (and this is `msgspec`'s affair).
+Tuples and sets are not really supported: they are converted to lists (and this is `msgspec`'s affair).
 
 Keyword arguments are not supported.
 
-A limited support of generators is provided, with two caveats:
- - An instantiated generator needs to be fully consumed or closed before calling any other function of the same `Remote` instance (mind `strict=True` when using `zip(...)`).
- - The generation is asynchronous, i.e., the server starts yielding values before the client starts consuming them. The buffering happens at the socket level. This could actually be beneficial for speed.
+Partial support for generators is included, with two caveats:
+ - A generator must be fully consumed or explicitly closed by the client before invoking any other function on the same `Remote` instance (watch out for `strict=True` when using `zip(...)`).
+ - Generation is asynchronous: the server begins yielding values before the client starts consuming them. Buffering occurs at the socket level—this can actually improve performance.
 
 # Pros
 
- * Accepts functions taking and returning `numpy.ndarray`s (kinda designed for this particular purpose, actually).
- * Exceptions are rethrown remotely.
+ * Supports functions taking and returning `numpy.ndarray`s (in fact, designed for this particular purpose).
+ * Exceptions are propagated and re-raised on the client side.
  * Efficient serialization with MessagePack
- * The server can handle multiple clients at a time by threading or forking (check out `rpc17.Server`).
- * TCP/IP and Unix domain sockets are supported.
+ * The server can handle multiple clients via threading or forking  (check out `rpc17.Server`).
+ * Supports both TCP/IP and Unix domain sockets.
 
 # Cons
 
- * Security/authentication? Never thought of it. Designed to be used in confined environments. Avoid exposing over internet.
+ * Security/authentication? Never thought of it. Designed to be used in confined environments. Avoid exposing over the internet.
